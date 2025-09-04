@@ -1,1 +1,2 @@
 # crypto-insight-dashboard
+Databricks notebooks for ingesting and transforming Binance kline data into Delta Lake bronze, silver and gold tables. The ingestion and transformation steps now perform upserts using the `unique_key` column so that reruns do not produce duplicate records.
