@@ -1,69 +1,63 @@
-# Crypto Ingest → Transform → Aggregate → Signals (Databricks)
+# Crypto Data Ingest → Transform → Aggregate → Signals (Using Databricks)
 
-This repository provides a 4-step pipeline for ingesting Binance Kline (candlestick) data into Databricks, 
+This project provides a 4-step pipeline for ingesting Binance Kline (candlestick) data into Databricks, 
 transforming it into structured tables, aggregating into time windows, and generating trading signals.
 
 - `01_ingest_bronze_binance.py` — Ingest Binance REST data into a Bronze Delta table
 - `02_transform_silver_binance.py` — Transform Bronze → Silver structured schema
-- `03_aggregate_gold_binance.py` — Aggregate Silver → Gold (time buckets)
-- `04_generate_signals_binance.py` — Generate moving averages and cross signals from Gold
-
-> Default catalog/schema is `demo_catalog.demo_schema`. Update if necessary.
+- `03_aggregate_gold_binance.py` — Aggregate Silver → Gold
+- `04_generate_signals_binance.py` — Generate trading signals from Gold
 
 ---
 
 ## 0) Prerequisites
 
-- Databricks workspace (with Repos/Notebook access)
+- Databricks workspace
+- A cluster
 - Unity Catalog enabled with permission to create catalog/schema
-- Cluster
-- Outbound internet access to **api.binance.com**
+- Outbound internet access to `api.binance.com`
 
 ---
 
 ## 1) Create Catalog & Schema
 
-In the **SQL Editor**:
+Open **SQL Editor** and run:
 
 ```sql
 CREATE CATALOG IF NOT EXISTS demo_catalog;
 CREATE SCHEMA  IF NOT EXISTS demo_catalog.demo_schema;
 ```
+> If you use a different name, update CATALOG / SCHEMA constants in all scripts accordingly.
 
 ---
 
-## 2) Import 4 Scripts/Notebooks
+## 2) Import 4 Scripts to Databricks Workspace
 
-Option A) Connect this repo to **Databricks Repos**,  
-Option B) Create 4 **Databricks notebooks** and paste each script.
-
-Names:
-
-1. `01_ingest_bronze_binance.py`
-2. `02_transform_silver_binance.py`
-3. `03_aggregate_gold_binance.py`
-4. `04_generate_signals_binance.py`
-
-Ensure each notebook is in **Python** mode.
+1. In the left sidebar, go to Repos → Add Repo.
+2. Paste your Git URL (e.g., https://github.com/your-username/crypto-insight-pipeline.git).
+3. Choose the branch (e.g., main or dev) and Create.
+4. After the repo folder appears in Workspace, verify the four files exist:
+- `01_ingest_bronze_binance.py`
+- `02_transform_silver_binance.py`
+- `03_aggregate_gold_binance.py`
+- `04_generate_signals_binance.py`
+5. Open each file and attach a cluster (top-right cluster picker).
+6. Ensure each notebook’s default language is Python (not SQL/Scala/R).
 
 ---
 
-## 3) Run 01_ingest_bronze_binance.py (Bronze)
-
-This script fetches from Binance `/api/v3/klines` and writes into a Bronze Delta table.
-
+## 3) Run `01_ingest_bronze_binance.py`
+This script fetches data from Binance `/api/v3/klines` and writes into a Bronze Delta table.
 - Bronze: `demo_catalog.demo_schema.bronze_charts`
-- State : `demo_catalog.demo_schema.bronze_ingest_state`
+- State : `demo_catalog.demo_schema.bronze_ingest_state` (last open_time per symbol/interval)
 
-Parameters:
-
+Key parameters:
 - `MODE` = `"backfill" | "once" | "poll" | "forever"`
 - `SYMBOLS` = `["BTCUSDT","ETHUSDT"]`
 - `INTERVALS` = `["1m"]`
-- `BACKFILL_HOURS` = `720` (30 days)
+- `BACKFILL_HOURS` = `720`
 
-### Recommended first run
-
+Recommended first run
 ```python
 MODE = "backfill"
 SYMBOLS = ["BTCUSDT","ETHUSDT"]
@@ -74,7 +68,6 @@ BACKFILL_HOURS = 720
 Then **Run all**.
 
 Validate:
-
 ```sql
 SELECT COUNT(*) FROM demo_catalog.demo_schema.bronze_charts;
 SELECT * FROM demo_catalog.demo_schema.bronze_charts ORDER BY event_time DESC LIMIT 10;
@@ -82,17 +75,14 @@ SELECT * FROM demo_catalog.demo_schema.bronze_charts ORDER BY event_time DESC LI
 
 ---
 
-## 4) Run 02_transform_silver_binance.py (Silver)
-
+## 4) Run `02_transform_silver_binance.py`
 Parses `raw_json` from Bronze into structured columns, MERGE upsert into Silver.
-
 - Input: `demo_catalog.demo_schema.bronze_charts`
 - Output: `demo_catalog.demo_schema.silver_charts`
 
-Run all.
+**Run all**.
 
 Validate:
-
 ```sql
 SELECT COUNT(*) FROM demo_catalog.demo_schema.silver_charts;
 SELECT symbol, interval, open_time, close
@@ -102,18 +92,15 @@ ORDER BY open_time DESC LIMIT 10;
 
 ---
 
-## 5) Run 03_aggregate_gold_binance.py (Gold)
-
-Aggregates Silver candles into fixed windows (default **5 minutes**) and upserts into Gold.
-
+## 5) Run `03_aggregate_gold_binance.py`
+Aggregates Silver candles into fixed windows (default 5 minutes) and upserts into Gold.
 - Input: `demo_catalog.demo_schema.silver_charts`
 - Output: `demo_catalog.demo_schema.gold_signals`
 - Window: `WINDOW_SPEC = "5 minutes"`
 
-Run all.
+**Run all**.
 
 Validate:
-
 ```sql
 SELECT COUNT(*) FROM demo_catalog.demo_schema.gold_signals;
 SELECT symbol, bucket_start, avg_price
@@ -123,14 +110,12 @@ ORDER BY bucket_start DESC LIMIT 10;
 
 ---
 
-## 6) Run 04_generate_signals_binance.py (Signals)
-
-Calculates MA(50/200), Golden/Dead Cross, and MA200 status from Gold → Signals.
-
+## 6) Run `04_generate_signals_binance.py`
+Calculates MA(50/200), Golden/Dead Cross, and above/below MA200 flags, then MERGE-upserts to Signals.
 - Input: `demo_catalog.demo_schema.gold_signals`
 - Output: `demo_catalog.demo_schema.signals_charts`
 
-Run all.
+**Run all**.
 
 Validate:
 
@@ -150,9 +135,10 @@ ORDER BY symbol;
 ---
 
 ## 7) Create Views for Visualization
+Copy each block into SQL Editor and run.
 
+Latest Price
 ```sql
--- Latest price
 CREATE OR REPLACE VIEW demo_catalog.demo_schema.v_latest_price AS
 WITH last AS (
   SELECT symbol, MAX(open_time) AS last_ts
@@ -163,8 +149,10 @@ SELECT s.symbol, s.close AS last_price, s.open_time AS last_ts
 FROM demo_catalog.demo_schema.silver_charts s
 JOIN last l
   ON s.symbol = l.symbol AND s.open_time = l.last_ts;
+```
 
--- 24h summary
+24h summary
+```sql
 CREATE OR REPLACE VIEW demo_catalog.demo_schema.v_summary_24h AS
 WITH base AS (
   SELECT symbol, close, open_time
@@ -186,8 +174,10 @@ SELECT DISTINCT
   (last_close - first_close)         AS abs_change_24h,
   (last_close - first_close) / NULLIF(first_close, 0) * 100 AS pct_change_24h
 FROM first_last;
+```
 
--- Signals view
+Signals view
+```sql
 CREATE OR REPLACE VIEW demo_catalog.demo_schema.v_signals AS
 SELECT
   symbol,
@@ -203,20 +193,7 @@ FROM demo_catalog.demo_schema.signals_charts;
 
 ---
 
-## 9) Execution Order
-
-1. Create catalog/schema
-2. Install requests
-3. Run `01_ingest_bronze_binance.py`
-4. Run `02_transform_silver_binance.py`
-5. Run `03_aggregate_gold_binance.py`
-6. Run `04_generate_signals_binance.py`
-7. (Optional) Create views
-
----
-
-## 10) Troubleshooting
-
+## 8) Troubleshooting
 - **429 Too Many Requests**: Reduce symbols/intervals, shorten backfill hours. Script retries with backoff.
 - **Catalog/Schema permission error**: Request admin permissions or use existing catalog/schema.
 - **Binance API connection fail**: Check VPC/firewall outbound rules.
@@ -225,8 +202,7 @@ FROM demo_catalog.demo_schema.signals_charts;
 
 ---
 
-## 11) Cleanup
-
+## 9) Cleanup
 ```sql
 DROP VIEW  IF EXISTS demo_catalog.demo_schema.v_latest_price;
 DROP VIEW  IF EXISTS demo_catalog.demo_schema.v_summary_24h;
