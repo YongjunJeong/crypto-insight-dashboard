@@ -54,15 +54,15 @@ This script fetches data from Binance `/api/v3/klines` and writes into a Bronze 
 Key parameters:
 - `MODE` = `"backfill" | "once" | "poll" | "forever"`
 - `SYMBOLS` = `["BTCUSDT","ETHUSDT"]`
-- `INTERVALS` = `["1m"]`
-- `BACKFILL_HOURS` = `720`
+- `INTERVALS` = `["15m"]`
+- `BACKFILL_HOURS` = `168`
 
 Recommended first run
 ```python
 MODE = "backfill"
 SYMBOLS = ["BTCUSDT","ETHUSDT"]
-INTERVALS = ["1m"]
-BACKFILL_HOURS = 720
+INTERVALS = ["15m"]
+BACKFILL_HOURS = 168
 ```
 
 Then **Run all**.
