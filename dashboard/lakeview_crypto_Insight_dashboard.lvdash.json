@@ -1,0 +1,768 @@
+{
+  "datasets": [
+    {
+      "name": "0a295700",
+      "displayName": "chart_15m",
+      "queryLines": [
+        "-- Lakeview 데이터셋 쿼리 (Add data source → SQL)\n",
+        "-- 파라미터: {{ symbol }}, {{ days_back }}\n",
+        "SELECT\n",
+        "  from_utc_timestamp(open_time, 'Asia/Seoul') AS ts_kr,  -- 서울시간으로 축 표시(원하면 UTC 그대로 써도 OK)\n",
+        "  open_time,                                            -- 원시 UTC 시각(참고용)\n",
+        "  close,\n",
+        "  ma50_15m,\n",
+        "  ma200_15m,\n",
+        "  symbol\n",
+        "FROM demo_catalog.demo_schema.gold_prices_15m\n",
+        "WHERE symbol = :parameter\n",
+        "  AND open_time >= current_timestamp() - INTERVAL 14 DAYS\n",
+        "ORDER BY open_time"
+      ],
+      "parameters": [
+        {
+          "displayName": "parameter",
+          "keyword": "parameter",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "BTCUSDT"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2af53a83",
+      "displayName": "gold_prices_4h",
+      "queryLines": [
+        "SELECT * FROM demo_catalog.demo_schema.gold_prices_4h"
+      ]
+    },
+    {
+      "name": "d6d03960",
+      "displayName": "gold_prices_15m",
+      "queryLines": [
+        "SELECT * FROM demo_catalog.demo_schema.gold_prices_15m"
+      ]
+    },
+    {
+      "name": "619ec527",
+      "displayName": "gold_dashboard_summary",
+      "queryLines": [
+        "SELECT * FROM demo_catalog.demo_schema.gold_dashboard_summary"
+      ]
+    },
+    {
+      "name": "0167cb52",
+      "displayName": "Silver_Top_Positions_LatestProfit",
+      "queryLines": [
+        "WITH latest AS (\n",
+        "  SELECT s.*,\n",
+        "         ROW_NUMBER() OVER (PARTITION BY uid, symbol ORDER BY event_time DESC) AS rn\n",
+        "  FROM demo_catalog.demo_schema.silver_futures_positions s\n",
+        ")\n",
+        "SELECT\n",
+        "  symbol,\n",
+        "  amount            AS size,\n",
+        "  entryPrice        AS entry_price,\n",
+        "  markPrice         AS mark_price,\n",
+        "  event_time        AS time,\n",
+        "  pnl,\n",
+        "  ROUND(roe * 100, 4) AS roi_pct\n",
+        "FROM latest\n",
+        "WHERE rn = 1\n",
+        "ORDER BY pnl ASC;   -- 손실 큰 순으로 정렬(원하면 DESC)\n"
+      ]
+    },
+    {
+      "name": "3d70971c",
+      "displayName": "Silver_Futures_Positions_Freshness_Status",
+      "queryLines": [
+        "SELECT\n",
+        "  MAX(event_time) AS last_event_time,\n",
+        "  CASE\n",
+        "    WHEN MAX(event_time) < now() - INTERVAL 30 MINUTE\n",
+        "      THEN 'STALE'\n",
+        "    ELSE 'FRESH'\n",
+        "  END AS freshness\n",
+        "FROM demo_catalog.demo_schema.silver_futures_positions;\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "c16b3349",
+      "displayName": "Dashboard",
+      "layout": [
+        {
+          "widget": {
+            "name": "d6815758",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "619ec527",
+                  "fields": [
+                    {
+                      "name": "symbol",
+                      "expression": "`symbol`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "symbol",
+                  "displayName": "symbol"
+                }
+              },
+              "frame": {
+                "title": "SYMBOL",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "abbca3f9",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "619ec527",
+                  "fields": [
+                    {
+                      "name": "latest_price",
+                      "expression": "`latest_price`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "latest_price",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  },
+                  "displayName": "latest_price"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "LATEST PRICE"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "2ad1ff8a",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "619ec527",
+                  "fields": [
+                    {
+                      "name": "fgi_value",
+                      "expression": "`fgi_value`"
+                    },
+                    {
+                      "name": "fgi_class",
+                      "expression": "`fgi_class`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "fgi_class",
+                  "displayName": "fgi_class"
+                },
+                "target": {
+                  "fieldName": "fgi_value",
+                  "displayName": "fgi_value"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Fear & Greed Index"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "50f3af87",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "619ec527",
+                  "fields": [
+                    {
+                      "name": "change_24h_pct",
+                      "expression": "`change_24h_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "change_24h_pct",
+                  "displayName": "change_24h_pct"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "24h Change %"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "d0c0aac0",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "619ec527",
+                  "fields": [
+                    {
+                      "name": "cross_signal_4h",
+                      "expression": "`cross_signal_4h`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "cross_signal_4h",
+                  "displayName": "cross_signal_4h"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cross Signal"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 4,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "4e5c592c",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "619ec527",
+                  "fields": [
+                    {
+                      "name": "updated_at",
+                      "expression": "`updated_at`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "updated_at",
+                  "format": {
+                    "type": "date-time",
+                    "date": "year-month-day",
+                    "time": "none",
+                    "leadingZeros": true
+                  },
+                  "displayName": "updated_at"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "UPDATE TIME"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 4,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "1806eedf",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "0a295700",
+                  "fields": [
+                    {
+                      "name": "minutely(open_time)",
+                      "expression": "DATE_TRUNC(\"MINUTE\", `open_time`)"
+                    },
+                    {
+                      "name": "close",
+                      "expression": "`close`"
+                    },
+                    {
+                      "name": "ma200_15m",
+                      "expression": "`ma200_15m`"
+                    },
+                    {
+                      "name": "ma50_15m",
+                      "expression": "`ma50_15m`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "minutely(open_time)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "format": {
+                    "type": "date-time",
+                    "date": "year-month-day",
+                    "time": "locale-hour-minute"
+                  },
+                  "displayName": "open_time"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "fields": [
+                    {
+                      "fieldName": "close",
+                      "displayName": "close"
+                    },
+                    {
+                      "fieldName": "ma200_15m",
+                      "displayName": "ma200_15m"
+                    },
+                    {
+                      "fieldName": "ma50_15m",
+                      "displayName": "ma50_15m"
+                    }
+                  ],
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                },
+                "label": {
+                  "show": false
+                }
+              },
+              "mark": {
+                "colors": [
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 1
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 2
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 4
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 4
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 5
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 6
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 7
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 8
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 9
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 10
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "6cbc1a7b",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "0167cb52",
+                  "fields": [
+                    {
+                      "name": "symbol",
+                      "expression": "`symbol`"
+                    },
+                    {
+                      "name": "size",
+                      "expression": "`size`"
+                    },
+                    {
+                      "name": "entry_price",
+                      "expression": "`entry_price`"
+                    },
+                    {
+                      "name": "mark_price",
+                      "expression": "`mark_price`"
+                    },
+                    {
+                      "name": "time",
+                      "expression": "`time`"
+                    },
+                    {
+                      "name": "pnl",
+                      "expression": "`pnl`"
+                    },
+                    {
+                      "name": "roi_pct",
+                      "expression": "`roi_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "symbol",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 100000,
+                    "title": "symbol",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "symbol"
+                  },
+                  {
+                    "fieldName": "size",
+                    "numberFormat": "0.00",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 100001,
+                    "title": "size",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "size"
+                  },
+                  {
+                    "fieldName": "entry_price",
+                    "numberFormat": "0.00",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 100002,
+                    "title": "entry_price",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "entry_price"
+                  },
+                  {
+                    "fieldName": "mark_price",
+                    "numberFormat": "0.00",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 100003,
+                    "title": "mark_price",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "mark_price"
+                  },
+                  {
+                    "fieldName": "time",
+                    "dateTimeFormat": "DD/MM/YYYY HH:mm:ss.SSS",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "visible": true,
+                    "order": 100004,
+                    "title": "time",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "time"
+                  },
+                  {
+                    "fieldName": "pnl",
+                    "numberFormat": "0.00",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 100005,
+                    "title": "pnl",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "pnl"
+                  },
+                  {
+                    "fieldName": "roi_pct",
+                    "numberFormat": "0.00",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 100006,
+                    "title": "roi_pct",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "roi_pct"
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": true,
+                "title": "KR Top trader Positions"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 6,
+            "height": 4
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    }
+  }
+}
