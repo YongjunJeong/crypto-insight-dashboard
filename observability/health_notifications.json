@@ -1,0 +1,63 @@
+{
+  "pipeline_name": "crypto-insight-dashboard-streaming",
+  "data_quality_slo": {
+    "freshness_minutes": 10,
+    "max_data_loss_percentage": 0.01,
+    "max_429_rate": 0.05
+  },
+  
+  "alerts": [
+    {
+      "alert_id": "CRITICAL_JOB_FAILURE",
+      "severity": "CRITICAL",
+      "metric_type": "JOB_HEALTH",
+      "condition": "last_run_status == 'FAILED'",
+      "target_jobs": ["01a_ingest_bronze_binance", "02_transform_silver_binance", "03_aggregate_gold_binance"],
+      "action": ["SLACK_CHANNEL_OPS", "EMAIL_OPS_TEAM"]
+    },
+    {
+      "alert_id": "FRESHNESS_LAG_VIOLATION",
+      "severity": "HIGH",
+      "metric_type": "WATERMARK_DELAY",
+      "source_table": "silver_charts",
+      "condition": "watermark_delay_minutes > 15",
+      "description": "Silver 테이블의 Watermark 지연이 SLO(10분)를 초과했습니다. 데이터 밀림(lag) 발생 가능성이 높습니다.",
+      "action": ["SLACK_CHANNEL_OPS"]
+    },
+    {
+      "alert_id": "DATA_SKEW_WARNING",
+      "severity": "MEDIUM",
+      "metric_type": "SPARK_PERFORMANCE",
+      "condition": "p95_task_duration > 5 * p50_task_duration",
+      "description": "최대 Task 실행 시간이 중간값의 5배를 초과했습니다. 데이터 Skew 또는 리소스 부족이 의심됩니다. (Spark UI 진단 필요)",
+      "action": ["SLACK_CHANNEL_OPS"]
+    },
+    {
+      "alert_id": "API_RATE_LIMIT_EXCEEDED",
+      "severity": "HIGH",
+      "metric_type": "UPSTREAM_API_HEALTH",
+      "source_api": "Binance / X(Twitter)",
+      "condition": "429_rate > 0.05",
+      "description": "API 429 (Rate Limit) 에러 비율이 임계치(5%)를 초과했습니다. Bronze 수집 속도 저하 또는 중단 위험.",
+      "action": ["SLACK_CHANNEL_OPS"]
+    },
+    {
+      "alert_id": "DATA_QUALITY_FGI_RANGE",
+      "severity": "WARNING",
+      "metric_type": "DATA_QUALITY_CHECK",
+      "source_table": "silver_fear_greed",
+      "condition": "fgi_value NOT BETWEEN 0 AND 100",
+      "description": "Fear & Greed 지수(fgi_value)가 정상 범위(0~100)를 벗어났습니다. (EXPECTATION VIOLATION) [5, 6]",
+      "action": ["QUARANTINE_BAD_ROW"]
+    },
+    {
+      "alert_id": "DLQ_COUNT_SPIKE",
+      "severity": "WARNING",
+      "metric_type": "DATA_LOSS",
+      "source_table": "DLQ_binance",
+      "condition": "dlq_rows_per_run > 1000",
+      "description": "단일 배치에서 DLQ(Dead Letter Queue)에 격리된 레코드 수가 급증했습니다. (스키마 드리프트 또는 포맷 문제) [7, 8]",
+      "action": ["SLACK_CHANNEL_OPS"]
+    }
+  ]
+}
