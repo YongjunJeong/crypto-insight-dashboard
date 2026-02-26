@@ -8,6 +8,22 @@
 
 ### 2. 데이터 수집 및 API 안정성 확보 (Bronze Layer)
 
+#### 2.0. Auto Loader vs. REST Polling: 설계 결정 근거
+
+**왜 Auto Loader(`cloudFiles`) 대신 REST Polling을 선택했는가:**
+
+Auto Loader는 Databricks 네이티브 솔루션으로 클라우드 스토리지(S3/ADLS/GCS)의 파일을 수집할 때 탁월하다. 다음 조건에서 Auto Loader가 적합하다:
+1. 데이터 소스가 클라우드 경로에 파일을 출력하는 경우 (파일 알림 또는 디렉토리 리스팅)
+2. `cloudFiles.schemaEvolutionMode = "addNewColumns"`로 스키마 진화를 허용하는 경우
+3. Structured Streaming으로 실시간 처리가 필요한 경우
+
+**이 프로젝트는 REST Polling이 더 적합한 이유:**
+- Binance, Fear & Greed Index, Apyflux는 모두 REST API로, JSON 페이로드를 직접 반환한다. 파일을 클라우드 경로에 쓰지 않으므로 Auto Loader가 직접 소비할 수 없다.
+- Auto Loader를 사용하려면 "API 응답 → S3 파일 저장 → Auto Loader가 S3 읽기" 라는 불필요한 중간 단계가 추가되어 복잡도와 비용이 증가한다.
+- 폴링 주기(4h 캔들 = 4시간 간격, FNG = 24시간 간격)는 마이크로배치 스트리밍 없이도 체크포인트 기반의 Exactly-Once를 충분히 보장한다.
+
+**Auto Loader가 적합한 확장 시나리오:** Binance WebSocket 호가창 피드나 Kafka 스트림을 소비하는 경우, `spark.readStream.format("kafka")`나 Auto Loader(`cloudFiles`)가 올바른 선택이다. 이 경우에도 메달리온 아키텍처는 그대로 유지된다.
+
 Bronze 단계에서는 어떤 변환도 시도하지 않고 원본 데이터를 그대로 수용함.
 
 #### 2.1. API 호출 안정성 및 Rate Limit 방어
@@ -44,6 +60,34 @@ Bronze 단계에서는 어떤 변환도 시도하지 않고 원본 데이터를 
 *   **Small Files Problem 해결:** 스트리밍 Job으로 발생하는 작은 파일 폭증을 해결하기 위해 **`OPTIMIZE`** 명령을 주기적으로 실행하여 파일들을 큰 파일로 **병합(Compaction)**.
 *   **쿼리 가속:** Gold 테이블에 **`ZORDER BY (symbol, bucket_start)`** 를 적용. 이는 대시보드 필터링 시 **불필요한 데이터 스캔**을 최소화하여 쿼리 응답 속도 향상.
 *   **데이터 Skew 대비:** Gold Join 로직에서 **Task Duration 편차(Skew)** 가 발생할 경우, AQE(Adaptive Query Execution)가 자동으로 Skew를 감지해 처리하도록 함.
+
+### 3.3. Adaptive Query Execution (AQE) 상세
+
+AQE(`spark.sql.adaptive.enabled = true`)는 모든 Transform/Gold 노트북에 활성화되어 있다. AQE는 쿼리 플래닝 방식을 **정적(사전 분석) → 동적(런타임 피드백)** 으로 전환한다. 이 파이프라인에서 관련 있는 3가지 기능:
+
+1. **Dynamic Partition Coalescing** (`coalescePartitions.enabled = true`): 셔플 후 Spark가 소규모 포스트-셔플 파티션을 더 적고 큰 파티션으로 병합한다. FNG silver 테이블처럼 하루 1건의 sparse 데이터는 셔플 후 대부분의 파티션이 비어있는데, AQE가 이를 자동으로 병합하여 Task 오버헤드를 줄인다.
+
+2. **Skew Join Optimization** (`skewJoin.enabled = true`): `03d`의 3원 조인에서 prices(고카디널리티)와 positions(심볼별 편중 가능)의 조인 시 BTCUSDT 데이터가 편중되면 특정 Task가 중앙값 대비 5배 이상 커질 수 있다. AQE가 이를 감지하고 해당 파티션을 자동으로 서브태스크로 분할한다.
+
+3. **Dynamic Join Strategy Switching**: AQE는 런타임 통계에서 한쪽이 충분히 작다고 판단되면 Sort-Merge Join을 Broadcast Join으로 전환할 수 있다. `03d`에서 명시적 `F.broadcast(fng)` 힌트와 함께 사용하여 **이중 안전장치**를 구성한다: 힌트가 정적 플래너에, AQE가 동적 플래너에 작동한다.
+
+### 3.4. VACUUM 전략 및 Time Travel 창
+
+VACUUM은 Delta 트랜잭션 로그에서 더 이상 참조하지 않는 Parquet 파일을 물리적으로 삭제한다. 보존 기간(Retention)이 Time Travel 조회 가능 범위를 결정한다.
+
+| 레이어 | 테이블 | VACUUM 보존 기간 | 근거 |
+|:---|:---|:---|:---|
+| Bronze | 모든 Bronze 테이블 | 7일 (168h) | Append-Only; 재수집 비용 낮음 |
+| Silver | 모든 Silver 테이블 | 7일 (168h) | Bronze에서 재구성 가능; 7일은 운영 롤백에 충분 |
+| Gold | 모든 Gold 테이블 | 14일 (336h) | 대시보드 source of truth; 발생 수일 후 발견되는 데이터 이상 대응에 필요 |
+| DLQ | bronze_dlq | 30일 (720h) | 감사 추적 및 재현(Replay) 목적 장기 보존 |
+
+**스케줄링:** VACUUM과 OPTIMIZE는 `04_maintenance_optimize_vacuum.ipynb`에서 함께 실행되며, Databricks Workflow Job으로 주 1회(일요일 02:00 UTC) 스케줄된다. Gold 파이프라인(03a-03d) 완료 후 이 노트북이 실행된다. OPTIMIZE를 먼저 실행하여 소파일을 병합한 후, VACUUM이 OPTIMIZE로 대체된 구버전 파일을 정리한다.
+
+**Time Travel 주요 활용 패턴:**
+- **롤백:** `RESTORE TABLE gold_prices_4h TO VERSION AS OF <N-1>` — 잘못된 Gold 쓰기 복구
+- **감사 쿼리:** `SELECT * FROM gold_prices_4h TIMESTAMP AS OF '2025-12-01'` — 특정 시점 스냅샷 재현
+- **파이프라인 실행 비교:** `VERSION AS OF N` vs `VERSION AS OF N-1` 조인으로 변경사항 diff
 
 ### 4. Gold Layer: 통합, 신호 생성 및 거버넌스
 
