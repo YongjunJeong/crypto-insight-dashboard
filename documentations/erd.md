@@ -63,6 +63,215 @@
 *   **쿼리 가속:** 대시보드에서 주로 필터링 및 범위 스캔에 사용되는 컬럼인 **`symbol`** 과 **`bucket_start`** 에 **`ZORDER`** 를 적용하여 클러스터링을 수행함으로써 검색 성능을 획기적으로 향상시킵니다.
 *   **파티셔닝:** 모든 레이어는 **`dt = date(event_time)`** 기준으로 파티셔닝되어 쿼리 시 불필요한 데이터 스캔(Partition Pruning)을 최소화합니다.
 
+## 5. DDL 구문 (Unity Catalog / Delta Lake)
+
+각 노트북은 실행 시 `CREATE TABLE IF NOT EXISTS`를 호출하여 자가 부트스트래핑된다. 아래는 각 레이어의 표준 DDL이다.
+
+```sql
+-- =========================================================
+-- BRONZE
+-- =========================================================
+CREATE TABLE IF NOT EXISTS demo_catalog.demo_schema.bronze_charts (
+  source            STRING,
+  symbol            STRING,
+  interval          STRING,
+  event_time        TIMESTAMP,
+  ingest_time       TIMESTAMP,
+  unique_key        STRING,
+  raw_json          STRING,
+  api_endpoint      STRING,
+  api_params_hash   STRING,
+  dt                DATE
+) USING DELTA
+PARTITIONED BY (dt)
+TBLPROPERTIES (
+  'delta.logRetentionDuration'         = 'interval 7 days',
+  'delta.deletedFileRetentionDuration' = 'interval 7 days'
+);
+
+CREATE TABLE IF NOT EXISTS demo_catalog.demo_schema.bronze_fear_greed (
+  source               STRING,
+  event_time           TIMESTAMP,
+  ingest_time          TIMESTAMP,
+  unique_key           STRING,
+  raw_json             STRING,
+  api_endpoint         STRING,
+  api_params_hash      STRING,
+  index_value          STRING,
+  value_classification STRING,
+  time_until_update    STRING,
+  dt                   DATE
+) USING DELTA
+PARTITIONED BY (dt)
+TBLPROPERTIES (
+  'delta.logRetentionDuration'         = 'interval 7 days',
+  'delta.deletedFileRetentionDuration' = 'interval 7 days'
+);
+
+CREATE TABLE IF NOT EXISTS demo_catalog.demo_schema.bronze_futures_leaderboard_positions (
+  source          STRING,
+  endpoint_name   STRING,
+  uid             STRING,
+  account_label   STRING,
+  symbol          STRING,
+  entryPrice      DOUBLE,
+  markPrice       DOUBLE,
+  pnl             DOUBLE,
+  roe             DOUBLE,
+  amount          DOUBLE,
+  leverage        DOUBLE,
+  yellow          BOOLEAN,
+  tradeBefore     BOOLEAN,
+  update_ts       LONG,
+  event_time      TIMESTAMP,
+  ingest_time     TIMESTAMP,
+  unique_key      STRING,
+  raw_json        STRING,
+  api_endpoint    STRING,
+  api_params_hash STRING,
+  dt              DATE
+) USING DELTA
+PARTITIONED BY (dt)
+TBLPROPERTIES (
+  'delta.logRetentionDuration'         = 'interval 7 days',
+  'delta.deletedFileRetentionDuration' = 'interval 7 days'
+);
+
+-- DLQ: 복구 불가능한 실패 기록 (4xx HTTP, Auth 오류 등)
+CREATE TABLE IF NOT EXISTS demo_catalog.demo_schema.bronze_dlq (
+  source         STRING,
+  uid            STRING,
+  error_code     STRING,
+  error_message  STRING,
+  payload_json   STRING,
+  ingest_run_id  STRING,
+  failed_at      TIMESTAMP,
+  dt             DATE
+) USING DELTA
+PARTITIONED BY (dt)
+TBLPROPERTIES (
+  'delta.logRetentionDuration'         = 'interval 90 days',
+  'delta.deletedFileRetentionDuration' = 'interval 30 days'
+);
+
+-- =========================================================
+-- SILVER
+-- =========================================================
+CREATE TABLE IF NOT EXISTS demo_catalog.demo_schema.silver_charts (
+  symbol       STRING,
+  interval     STRING,
+  open_time    TIMESTAMP,
+  open         DOUBLE,
+  high         DOUBLE,
+  low          DOUBLE,
+  close        DOUBLE,
+  volume       DOUBLE,
+  unique_key   STRING,
+  event_time   TIMESTAMP,
+  dt           DATE
+) USING DELTA
+PARTITIONED BY (dt)
+TBLPROPERTIES (
+  'delta.logRetentionDuration'         = 'interval 7 days',
+  'delta.deletedFileRetentionDuration' = 'interval 7 days'
+);
+
+CREATE TABLE IF NOT EXISTS demo_catalog.demo_schema.silver_fear_greed (
+  ts_unix              BIGINT,
+  event_time           TIMESTAMP,
+  dt                   DATE,
+  index_value          INT,
+  value_classification STRING,
+  time_until_update    STRING,
+  unique_key           STRING
+) USING DELTA
+PARTITIONED BY (dt)
+TBLPROPERTIES (
+  'delta.logRetentionDuration'         = 'interval 7 days',
+  'delta.deletedFileRetentionDuration' = 'interval 7 days'
+);
+
+CREATE TABLE IF NOT EXISTS demo_catalog.demo_schema.silver_futures_positions (
+  source        STRING,
+  endpoint_name STRING,
+  account_label STRING,
+  uid           STRING,
+  symbol        STRING,
+  unique_key    STRING,
+  entryPrice    DOUBLE,
+  markPrice     DOUBLE,
+  pnl           DOUBLE,
+  roe           DOUBLE,
+  amount        DOUBLE,
+  leverage      DOUBLE,
+  yellow        BOOLEAN,
+  tradeBefore   BOOLEAN,
+  update_ts     BIGINT,
+  event_time    TIMESTAMP,
+  ingest_time   TIMESTAMP,
+  dt            DATE
+) USING DELTA
+PARTITIONED BY (dt)
+TBLPROPERTIES (
+  'delta.logRetentionDuration'         = 'interval 7 days',
+  'delta.deletedFileRetentionDuration' = 'interval 7 days'
+);
+
+-- =========================================================
+-- GOLD
+-- =========================================================
+CREATE TABLE IF NOT EXISTS demo_catalog.demo_schema.gold_prices_4h (
+  symbol         STRING,
+  bucket_start   TIMESTAMP,
+  close_4h       DOUBLE,
+  ma50_4h        DOUBLE,
+  ma200_4h       DOUBLE,
+  cross_signal   STRING,
+  pct_change_24h DOUBLE,
+  dt             DATE
+) USING DELTA
+PARTITIONED BY (dt)
+TBLPROPERTIES (
+  'delta.logRetentionDuration'         = 'interval 30 days',
+  'delta.deletedFileRetentionDuration' = 'interval 14 days'
+);
+
+CREATE TABLE IF NOT EXISTS demo_catalog.demo_schema.gold_futures_positions_summary (
+  uid        STRING,
+  symbol     STRING,
+  entryPrice DOUBLE,
+  markPrice  DOUBLE,
+  pnl        DOUBLE,
+  roe        DOUBLE,
+  amount     DOUBLE,
+  leverage   DOUBLE,
+  event_time TIMESTAMP,
+  updated_at TIMESTAMP
+) USING DELTA
+TBLPROPERTIES (
+  'delta.logRetentionDuration'         = 'interval 30 days',
+  'delta.deletedFileRetentionDuration' = 'interval 14 days'
+);
+
+CREATE TABLE IF NOT EXISTS demo_catalog.demo_schema.gold_fear_greed (
+  ts_utc       TIMESTAMP,
+  dt           DATE,
+  value        INT,
+  value_class  STRING,
+  ma7          DOUBLE,
+  ma30         DOUBLE,
+  z30          DOUBLE,
+  d1_change    INT,
+  d7_change    INT,
+  streak_days  INT
+) USING DELTA
+PARTITIONED BY (dt)
+TBLPROPERTIES (
+  'delta.logRetentionDuration'         = 'interval 30 days',
+  'delta.deletedFileRetentionDuration' = 'interval 14 days'
+);
+```
+
 ## 4. 운영 및 거버넌스 원칙
 
 이 모델은 Databricks SE가 필수적으로 관리해야 하는 운영 기능을 포함합니다.
