@@ -8,10 +8,12 @@ import requests
 from pyspark.sql import Row
 from pyspark.sql.functions import col, to_timestamp
 from pyspark.sql.types import StructField, StructType, StringType
+from delta.tables import DeltaTable
 
 # Delta Lake 소파일 자동 병합 및 백그라운드 컴팩션
 spark.conf.set("spark.databricks.delta.optimizeWrite","true")
 spark.conf.set("spark.databricks.delta.autoCompact","true")
+spark.sql("SET spark.sql.session.timeZone=UTC")  # 모든 시간은 UTC 기준
 
 # =========================
 # (A) 실행 설정
@@ -78,7 +80,7 @@ def _fetch_fear_greed(limit: int) -> Tuple[List[Dict], Dict[str, str], Dict[str,
     return data, response.headers, params
 
 def _rows_to_bronze(rows: List[Dict], endpoint: str, params: Dict[str, str]) -> int:
-    """Fear & Greed 데이터를 Bronze 테이블에 Append (unique_key 기준 중복 제거)"""
+    """Fear & Greed 데이터를 Bronze 테이블에 MERGE (unique_key 기준 멱등 upsert)"""
     if not rows:
         return 0
 
@@ -127,7 +129,11 @@ def _rows_to_bronze(rows: List[Dict], endpoint: str, params: Dict[str, str]) -> 
             .repartition("dt"))
 
     count = df.count()
-    df.writeTo(TABLE).append()
+    delta_table = DeltaTable.forName(spark, TABLE)
+    (delta_table.alias("t")
+        .merge(df.alias("s"), "t.unique_key = s.unique_key")
+        .whenNotMatchedInsertAll()
+        .execute())
     return count
 
 def _ingest_once(limit: int) -> int:
@@ -151,7 +157,10 @@ elif MODE == "poll":
     # API 갱신 주기(24h)에 맞춰 최대 MAX_POLLS회 반복
     poll_interval = max(POLL_SECONDS, API_REFRESH_SECONDS)
     for _ in range(MAX_POLLS):
-        _ingest_once(LIMIT_ONCE)
+        try:
+            _ingest_once(LIMIT_ONCE)
+        except Exception as exc:
+            print(f"[경고] {exc}")
         time.sleep(poll_interval)
     dbutils.notebook.exit("공포탐욕 폴링 완료")
 elif MODE == "forever":

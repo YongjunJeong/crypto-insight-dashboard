@@ -1,27 +1,46 @@
 {
-  "pipeline_name": "crypto-insight-dashboard-streaming",
+  "pipeline_name": "crypto-insight-dashboard-batch",
   "data_quality_slo": {
-    "freshness_minutes": 10,
-    "max_data_loss_percentage": 0.01,
+    "freshness_minutes_4h_bucket": 30,
     "max_429_rate": 0.05
   },
-  
+
   "alerts": [
     {
       "alert_id": "CRITICAL_JOB_FAILURE",
       "severity": "CRITICAL",
       "metric_type": "JOB_HEALTH",
       "condition": "last_run_status == 'FAILED'",
-      "target_jobs": ["01a_ingest_bronze_binance", "02_transform_silver_binance", "03_aggregate_gold_binance"],
+      "target_jobs": [
+        "pipeline/bronze/binance_klines.ipynb",
+        "pipeline/bronze/fear_greed_index.py",
+        "pipeline/silver/transform_charts.ipynb",
+        "pipeline/silver/transform_fear_greed.ipynb",
+        "pipeline/gold/price_signals.ipynb",
+        "pipeline/gold/fear_greed_metrics.ipynb",
+        "pipeline/gold/joined_dashboard.ipynb"
+      ],
       "action": ["SLACK_CHANNEL_OPS", "EMAIL_OPS_TEAM"]
+    },
+    {
+      "alert_id": "DQ_ASSERTION_FAILURE",
+      "severity": "CRITICAL",
+      "metric_type": "DATA_QUALITY_CHECK",
+      "source_notebooks": [
+        "pipeline/silver/transform_charts.ipynb",
+        "pipeline/silver/transform_fear_greed.ipynb"
+      ],
+      "condition": "assert_error_raised == true",
+      "description": "Silver 노트북 마지막 셀의 DQ 어서션(null/범위 검증)이 실패해 노트북이 중단되었습니다. RUNBOOK.md 시나리오 1 참고.",
+      "action": ["SLACK_CHANNEL_OPS"]
     },
     {
       "alert_id": "FRESHNESS_LAG_VIOLATION",
       "severity": "HIGH",
-      "metric_type": "WATERMARK_DELAY",
-      "source_table": "silver_charts",
-      "condition": "watermark_delay_minutes > 15",
-      "description": "Silver 테이블의 Watermark 지연이 SLO(10분)를 초과했습니다. 데이터 밀림(lag) 발생 가능성이 높습니다.",
+      "metric_type": "BUCKET_AGE",
+      "source_table": "gold_price_positions_4h",
+      "condition": "minutes_since(MAX(bucket_start)) > 30",
+      "description": "gold_price_positions_4h의 최신 bucket_start가 예상 폴링 주기(4시간봉 기준 30분 이내 갱신)를 벗어났습니다. RUNBOOK.md 시나리오 2 참고.",
       "action": ["SLACK_CHANNEL_OPS"]
     },
     {
@@ -36,7 +55,7 @@
       "alert_id": "API_RATE_LIMIT_EXCEEDED",
       "severity": "HIGH",
       "metric_type": "UPSTREAM_API_HEALTH",
-      "source_api": "Binance / X(Twitter)",
+      "source_api": "Binance",
       "condition": "429_rate > 0.05",
       "description": "API 429 (Rate Limit) 에러 비율이 임계치(5%)를 초과했습니다. Bronze 수집 속도 저하 또는 중단 위험.",
       "action": ["SLACK_CHANNEL_OPS"]
@@ -46,17 +65,8 @@
       "severity": "WARNING",
       "metric_type": "DATA_QUALITY_CHECK",
       "source_table": "silver_fear_greed",
-      "condition": "fgi_value NOT BETWEEN 0 AND 100",
-      "description": "Fear & Greed 지수(fgi_value)가 정상 범위(0~100)를 벗어났습니다. (EXPECTATION VIOLATION) [5, 6]",
-      "action": ["QUARANTINE_BAD_ROW"]
-    },
-    {
-      "alert_id": "DLQ_COUNT_SPIKE",
-      "severity": "WARNING",
-      "metric_type": "DATA_LOSS",
-      "source_table": "DLQ_binance",
-      "condition": "dlq_rows_per_run > 1000",
-      "description": "단일 배치에서 DLQ(Dead Letter Queue)에 격리된 레코드 수가 급증했습니다. (스키마 드리프트 또는 포맷 문제) [7, 8]",
+      "condition": "index_value NOT BETWEEN 0 AND 100",
+      "description": "Fear & Greed 지수(index_value)가 정상 범위(0~100)를 벗어났습니다.",
       "action": ["SLACK_CHANNEL_OPS"]
     }
   ]

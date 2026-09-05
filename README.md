@@ -1,7 +1,23 @@
 # Crypto Insight Dashboard — Databricks Medallion Pipeline
 
 Databricks + Delta Lake + Spark 기반의 **메달리온 아키텍처(Bronze → Silver → Gold)** 파이프라인.
-Binance Kline(캔들) 데이터와 Fear & Greed Index를 수집해 거래 신호 및 대시보드 지표를 생성한다.
+Binance Kline(캔들)과 Fear & Greed Index를 수집해 거래 신호와 시장 심리 지표를 하나의 대시보드로 통합한다.
+
+## 왜 만들었는가 (Use Case)
+
+암호화폐 트레이더가 의사결정을 내릴 때 필요한 정보 — **가격 추세(MA50/200, 골든·데드 크로스)**, **시장 심리(Fear & Greed Index)** — 는 보통 서로 다른 사이트에 흩어져 있어 따로 확인해야 한다. 이 프로젝트는 두 신호를 하나의 시간축(4시간 봉)으로 정렬해 한 화면에서 보여주는 것을 목표로 한다.
+
+> 초기 버전은 선물 리더보드(다른 트레이더의 포지션) 데이터도 통합했으나, 그 데이터 소스가 Binance의 비공식·비공개 내부 API를 리셀하는 유료 게이트웨이(Apyflux)에 의존하고 있었다. Binance가 2024년부터 해당 엔드포인트를 인증 필요로 전환해 더 이상 공식적으로 접근할 수 없어, 대체 스크래퍼로 땜질하는 대신 이 기능 자체를 스코프에서 제외했다. 자세한 배경은 `documentations/technical_thought.md` 참고.
+
+**아키텍처 선택의 트레이드오프:**
+
+| 결정 | 선택 | 이유 |
+| :--- | :--- | :--- |
+| 수집 방식 | REST API 배치 폴링 (Auto Loader/Structured Streaming 아님) | 소스가 파일 드롭이 아닌 REST 엔드포인트이고, Gold의 최소 단위가 4시간 봉이라 분 단위 실시간성이 필요하지 않음. 상시 스트리밍 클러스터 비용을 피할 수 있음. 자세한 근거는 `documentations/design.md` §1.3 참고. |
+| 신뢰성 확보 방식 | 상태 테이블 체크포인트 + `unique_key` 기준 `MERGE` | Streaming Checkpoint 없이도 "재실행해도 안전한" 멱등성을 배치로 달성. |
+| 시각화 계층 | Databricks Lakeview (Streamlit 아님) | 별도 앱 서버/인증 없이 Databricks 워크스페이스 안에서 바로 공유·권한관리 가능. |
+
+이 프로젝트에서 실제로 겪은 설계 실수와 그 교훈(추세를 신호로 착각한 버그 등)은 `documentations/technical_thought.md`에 정리했다.
 
 ## 파이프라인 구성
 
@@ -10,19 +26,15 @@ pipeline/
   bronze/                         # 외부 API → Delta Lake 원본 적재 (Append-Only)
     binance_klines.ipynb          # Binance /api/v3/klines → bronze_charts
     fear_greed_index.py           # api.alternative.me → bronze_fear_greed
-    leaderboard_positions.ipynb   # Apyflux 선물 리더보드 → bronze_futures_leaderboard_positions
   silver/                         # Bronze 정제 · 타입 표준화 · 중복 제거
     transform_charts.ipynb        # bronze_charts → silver_charts
     transform_fear_greed.ipynb    # bronze_fear_greed → silver_fear_greed
-    transform_leaderboard.ipynb   # bronze_futures → silver_futures_positions
   gold/                           # Silver 집계 · 지표 계산 · 대시보드 뷰
     price_signals.ipynb           # silver_charts → gold_prices_4h (MA50/200, Cross)
-    leaderboard_summary.ipynb     # silver_futures → gold_futures_positions_summary
     fear_greed_metrics.ipynb      # silver_fear_greed → gold_fear_greed (MA7/30, Z-Score)
-    joined_dashboard.ipynb        # 3-way join → gold_joined_dashboard
+    joined_dashboard.ipynb        # 2-way join → gold_price_positions_4h
   maintenance/                    # 운영 유지보수
     delta_optimize_vacuum.ipynb   # OPTIMIZE + ZORDER + VACUUM + DESCRIBE HISTORY
-    risky_position_alert.dbalert.json
 ```
 
 ---
@@ -32,7 +44,7 @@ pipeline/
 - Databricks 워크스페이스
 - 클러스터 (Databricks Runtime 14.x LTS 이상 권장)
 - Unity Catalog 활성화 및 카탈로그/스키마 생성 권한
-- `api.binance.com`, `api.alternative.me`, Apyflux 엔드포인트로의 아웃바운드 인터넷 접근
+- `api.binance.com`, `api.alternative.me`로의 아웃바운드 인터넷 접근
 
 ---
 
@@ -57,12 +69,9 @@ CREATE SCHEMA  IF NOT EXISTS demo_catalog.demo_schema;
 4. Workspace에 폴더가 나타나면 파이프라인 파일 존재 여부 확인:
    - `pipeline/bronze/binance_klines.ipynb`
    - `pipeline/bronze/fear_greed_index.py`
-   - `pipeline/bronze/leaderboard_positions.ipynb`
    - `pipeline/silver/transform_charts.ipynb`
    - `pipeline/silver/transform_fear_greed.ipynb`
-   - `pipeline/silver/transform_leaderboard.ipynb`
    - `pipeline/gold/price_signals.ipynb`
-   - `pipeline/gold/leaderboard_summary.ipynb`
    - `pipeline/gold/fear_greed_metrics.ipynb`
    - `pipeline/gold/joined_dashboard.ipynb`
    - `pipeline/maintenance/delta_optimize_vacuum.ipynb`
@@ -181,17 +190,17 @@ ORDER BY bucket_start DESC LIMIT 10;
 
 ## 6) Gold 통합: `pipeline/gold/joined_dashboard.ipynb`
 
-4h 가격 × 선물 포지션 × Fear & Greed 3-way join → 대시보드 통합 뷰 생성.
+4h 가격 × Fear & Greed 2-way join → 대시보드 통합 뷰 생성.
 
-> **실행 순서 주의:** 이 노트북 실행 전에 `gold/fear_greed_metrics.ipynb` 와 `gold/leaderboard_summary.ipynb` 를 먼저 실행하세요.
+> **실행 순서 주의:** 이 노트북 실행 전에 `gold/fear_greed_metrics.ipynb` 를 먼저 실행하세요.
 
-- **출력**: `demo_catalog.demo_schema.gold_joined_dashboard`
+- **출력**: `demo_catalog.demo_schema.gold_price_positions_4h`
 
 **Run all** 실행 후 검증:
 
 ```sql
-SELECT symbol, bucket_start, close_4h, fgi_value, fgi_class, total_pnl
-FROM demo_catalog.demo_schema.gold_joined_dashboard
+SELECT symbol, bucket_start, close_4h, fng_value, fng_label
+FROM demo_catalog.demo_schema.gold_price_positions_4h
 ORDER BY bucket_start DESC LIMIT 10;
 ```
 
@@ -319,8 +328,8 @@ RESTORE TABLE demo_catalog.demo_schema.gold_prices_4h TO VERSION AS OF 5;
 | **Binance API 연결 실패** | VPC/방화벽 아웃바운드 규칙 확인. |
 | **중복 데이터** | 모든 단계에서 MERGE와 dropDuplicates 적용 → 멱등성 보장. |
 | **Fear & Greed 갱신 주기** | API는 하루 1회(약 00:00 UTC) 업데이트. 24시간 이하 반복 호출 시 동일 값 반환; 스크립트가 최소 간격을 자동 보정. |
-| **DLQ 모니터링** | `SELECT * FROM demo_catalog.demo_schema.bronze_dlq ORDER BY failed_at DESC LIMIT 20` 으로 4xx 실패 내역 확인. `ingest_run_id` 로 특정 실패 배치를 추적하고 재처리 가능. |
-| **소파일 과다** | `maintenance/delta_optimize_vacuum.ipynb` 을 주 1회 실행하여 OPTIMIZE + ZORDER 적용. |
+| **joined_dashboard 실행 실패** | 선행 조건(`gold_fear_greed`)이 없으면 노트북이 즉시 예외를 던짐. `gold/fear_greed_metrics.ipynb`를 먼저 실행. |
+| **소파일 과다** | `maintenance/delta_optimize_vacuum.ipynb` 을 주 1회 실행하여 OPTIMIZE + ZORDER 적용. VACUUM은 DRY RUN으로 삭제 대상을 먼저 확인 후 실제 삭제. |
 
 ---
 
@@ -331,16 +340,12 @@ DROP VIEW  IF EXISTS demo_catalog.demo_schema.v_latest_price;
 DROP VIEW  IF EXISTS demo_catalog.demo_schema.v_summary_24h;
 DROP VIEW  IF EXISTS demo_catalog.demo_schema.v_signals;
 
-DROP TABLE IF EXISTS demo_catalog.demo_schema.gold_joined_dashboard;
+DROP TABLE IF EXISTS demo_catalog.demo_schema.gold_price_positions_4h;
 DROP TABLE IF EXISTS demo_catalog.demo_schema.gold_prices_4h;
-DROP TABLE IF EXISTS demo_catalog.demo_schema.gold_futures_positions_summary;
 DROP TABLE IF EXISTS demo_catalog.demo_schema.gold_fear_greed;
 DROP TABLE IF EXISTS demo_catalog.demo_schema.silver_charts;
 DROP TABLE IF EXISTS demo_catalog.demo_schema.silver_fear_greed;
-DROP TABLE IF EXISTS demo_catalog.demo_schema.silver_futures_positions;
 DROP TABLE IF EXISTS demo_catalog.demo_schema.bronze_charts;
 DROP TABLE IF EXISTS demo_catalog.demo_schema.bronze_fear_greed;
-DROP TABLE IF EXISTS demo_catalog.demo_schema.bronze_futures_leaderboard_positions;
 DROP TABLE IF EXISTS demo_catalog.demo_schema.bronze_ingest_state;
-DROP TABLE IF EXISTS demo_catalog.demo_schema.bronze_dlq;
 ```
