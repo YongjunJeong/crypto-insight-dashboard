@@ -48,7 +48,7 @@ Silver 레이어는 Bronze의 원본 데이터를 읽어 **표준화(Standardiza
 | 설계 항목 | 역할 및 상세 원칙 | 적용 기술 (Databricks / Spark) |
 | :--- | :--- | :--- |
 | **데이터 정제** | `raw_json`을 파싱하여 모든 컬럼을 명시적인 타입(TIMESTAMP, DOUBLE 등)으로 캐스팅합니다. | **UDF 남용 금지:** Catalyst Optimizer의 최적화 이점을 유지하기 위해 UDF 대신 내장 함수(`from_json`, `withColumn`, `when`)를 사용. |
-| **중복 제거** | 배치 재실행/백필로 인한 중복 데이터를 `unique_key` 기준으로 제거합니다. | `dropDuplicates(["unique_key"])` 후 `MERGE INTO` — 배치 잡이 몇 번을 재실행되어도 결과가 동일. |
+| **중복 제거** | 배치 재실행/백필로 인한 중복 데이터를 `unique_key` 기준으로 제거합니다. | `dropDuplicates(["unique_key"])` 후 `MERGE INTO`. 배치 잡을 몇 번 재실행해도 결과는 동일합니다. |
 | **품질 게이트 (DQ)** | MERGE 완료 후 최근 데이터에 대해 null/범위 위반을 검사하고, 위반 시 `assert`로 노트북을 즉시 중단시켜 오염 데이터가 Gold로 전파되는 것을 차단합니다. | `silver/transform_charts.ipynb`, `transform_fear_greed.ipynb` 모두 동일한 DQ 셀 패턴 적용. |
 | **Upsert 지원** | Binance처럼 과거 데이터가 재조회 시 달라질 수 있는 경우, 수정을 반영하여 정합성을 유지합니다. | **`MERGE INTO`** 연산으로 `unique_key` 기준 원자적 Upsert. |
 

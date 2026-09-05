@@ -14,7 +14,7 @@
 | :--- | :--- |
 | **Alert/증상** | `pipeline/silver/transform_charts.ipynb` (또는 `transform_fear_greed.ipynb`)가 **FAILED** 상태로 종료됨. |
 | **영향** | Gold 테이블 업데이트 중단. 대시보드 데이터 신선도(Freshness) 저하. |
-| **주요 원인** | (a) 데이터 품질(DQ) 어서션 실패 — 오염된 데이터가 Silver에 유입된 경우, (b) 스키마 불일치, (c) Spark OutOfMemory(OOM)/Skew. |
+| **주요 원인** | (a) 데이터 품질(DQ) 어서션 실패: 오염된 데이터가 Silver에 유입된 경우, (b) 스키마 불일치, (c) Spark OutOfMemory(OOM)/Skew. |
 
 ### 2. 진단 및 조사 (Investigation Steps)
 
@@ -84,7 +84,7 @@ Databricks Workflow Job으로 스케줄링할 경우 아래 순서를 지켜야 
 1.  `pipeline/bronze/binance_klines.ipynb`, `pipeline/bronze/fear_greed_index.py` (병렬 가능)
 2.  `pipeline/silver/transform_charts.ipynb`, `transform_fear_greed.ipynb` (각각 대응하는 Bronze 완료 후, 병렬 가능)
 3.  `pipeline/gold/price_signals.ipynb`, `fear_greed_metrics.ipynb` (각각 대응하는 Silver 완료 후, 병렬 가능)
-4.  `pipeline/gold/joined_dashboard.ipynb` (3번의 `fear_greed_metrics` 완료 후 — 코드에서 선행 테이블 존재 여부를 검증하므로, 순서가 틀리면 조용히 넘어가지 않고 즉시 실패합니다)
+4.  `pipeline/gold/joined_dashboard.ipynb` (3번의 `fear_greed_metrics` 완료 후. 코드에서 선행 테이블 존재 여부를 검증하므로, 순서가 틀리면 조용히 넘어가지 않고 즉시 실패합니다)
 5.  `pipeline/maintenance/delta_optimize_vacuum.ipynb` (주 1회, 전체 파이프라인과 별도 스케줄)
 
 ---

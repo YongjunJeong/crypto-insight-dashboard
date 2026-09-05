@@ -1,11 +1,11 @@
-# Crypto Insight Dashboard — Databricks Medallion Pipeline
+# Crypto Insight Dashboard: Databricks Medallion Pipeline
 
 Databricks + Delta Lake + Spark 기반의 **메달리온 아키텍처(Bronze → Silver → Gold)** 파이프라인.
 Binance Kline(캔들)과 Fear & Greed Index를 수집해 거래 신호와 시장 심리 지표를 하나의 대시보드로 통합한다.
 
 ## 왜 만들었는가 (Use Case)
 
-암호화폐 트레이더가 의사결정을 내릴 때 필요한 정보 — **가격 추세(MA50/200, 골든·데드 크로스)**, **시장 심리(Fear & Greed Index)** — 는 보통 서로 다른 사이트에 흩어져 있어 따로 확인해야 한다. 이 프로젝트는 두 신호를 하나의 시간축(4시간 봉)으로 정렬해 한 화면에서 보여주는 것을 목표로 한다.
+암호화폐 트레이더는 의사결정을 내릴 때 **가격 추세(MA50/200, 골든·데드 크로스)** 와 **시장 심리(Fear & Greed Index)** 를 함께 봐야 하는데, 보통 서로 다른 사이트에 흩어져 있어 따로 확인해야 한다. 이 프로젝트는 두 신호를 하나의 시간축(4시간 봉)으로 정렬해 한 화면에서 보여주는 것을 목표로 한다.
 
 > 초기 버전은 선물 리더보드(다른 트레이더의 포지션) 데이터도 통합했으나, 그 데이터 소스가 Binance의 비공식·비공개 내부 API를 리셀하는 유료 게이트웨이(Apyflux)에 의존하고 있었다. Binance가 2024년부터 해당 엔드포인트를 인증 필요로 전환해 더 이상 공식적으로 접근할 수 없어, 대체 스크래퍼로 땜질하는 대신 이 기능 자체를 스코프에서 제외했다. 자세한 배경은 `documentations/technical_thought.md` 참고.
 
@@ -95,7 +95,7 @@ Binance `/api/v3/klines` 에서 캔들 데이터를 가져와 Bronze Delta 테�
 | `SYMBOLS` | `["BTCUSDT","ETHUSDT","SOLUSDT"]` | 수집 대상 심볼 목록 |
 | `INTERVALS` | `["4h"]` | 캔들 인터벌 (4시간 봉만 수집) |
 | `LIMIT_ONCE` | `1000` | 1회 수집 최대 캔들 수 |
-| `BACKFILL_DAYS` | `200` | 백필 범위 (일) — MA200 안정화에 필요한 과거 데이터 기간 |
+| `BACKFILL_DAYS` | `200` | 백필 범위(일). MA200 안정화에 필요한 과거 데이터 기간 |
 
 최초 실행 권장 설정:
 
