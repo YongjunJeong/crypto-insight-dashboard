@@ -91,18 +91,19 @@ Binance `/api/v3/klines` 에서 캔들 데이터를 가져와 Bronze Delta 테�
 
 | 파라미터 | 기본값 | 설명 |
 |:---|:---|:---|
-| `MODE` | `"backfill"` | `backfill` \| `once` \| `poll` \| `forever` |
-| `SYMBOLS` | `["BTCUSDT","ETHUSDT"]` | 수집 대상 심볼 목록 |
-| `INTERVALS` | `["15m"]` | 캔들 인터벌 |
-| `BACKFILL_HOURS` | `168` | 백필 범위 (시간) |
+| `MODE` | `"once"` | `backfill` \| `once` \| `poll` \| `forever` |
+| `SYMBOLS` | `["BTCUSDT","ETHUSDT","SOLUSDT"]` | 수집 대상 심볼 목록 |
+| `INTERVALS` | `["4h"]` | 캔들 인터벌 (4시간 봉만 수집) |
+| `LIMIT_ONCE` | `1000` | 1회 수집 최대 캔들 수 |
+| `BACKFILL_DAYS` | `200` | 백필 범위 (일) — MA200 안정화에 필요한 과거 데이터 기간 |
 
 최초 실행 권장 설정:
 
 ```python
 MODE = "backfill"
-SYMBOLS = ["BTCUSDT", "ETHUSDT"]
-INTERVALS = ["15m"]
-BACKFILL_HOURS = 168
+SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+INTERVALS = ["4h"]
+BACKFILL_DAYS = 200
 ```
 
 **Run all** 실행 후 검증:
